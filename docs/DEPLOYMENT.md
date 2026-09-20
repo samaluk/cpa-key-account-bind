@@ -20,5 +20,7 @@ scoped traffic and restore the compatible library/configuration; the host can fa
 back to its own scheduler when this plugin is unavailable or disabled.
 
 A stale lock, corrupt store or capacity limit denies selection. Recover from a
-verified backup instead of resetting a live store. HTTP rejection status is owned
-by CPA; current scheduler errors can surface as HTTP 500.
+verified backup instead of resetting a live store. The CPA host must preserve the
+plugin's HTTP 403 policy denials and HTTP 503 availability failures. Older hosts
+that do not preserve scheduler errors can return HTTP 500 instead. Verify both
+allowed and denied requests against the intended host before deployment.
