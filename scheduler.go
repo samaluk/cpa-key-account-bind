@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -69,10 +70,10 @@ func handleConfigure(req []byte) []byte {
 //	                        |   empty result -> error (auth_not_bound) = FAIL
 //	                        |   else apply strategy inside the allowed set
 //
-// Errors (not Handled=false) make the host fail the request outright; it
-// never reschedules on its own after a scheduler error. That is the isolation
-// guarantee: a bound key either lands on an allowed credential or the request
-// fails loudly.
+// Errors (not Handled=false) prevent fallback to an unrestricted credential
+// pool. Policy denials carry HTTP 403 and retryable:false; service failures
+// remain distinct so the host can apply its retry policy without broadening
+// the allowed credential set.
 func handlePick(req []byte) []byte {
 	var pr schedulerPickRequest
 	if err := json.Unmarshal(req, &pr); err != nil {
@@ -91,15 +92,19 @@ func handlePick(req []byte) []byte {
 		}
 		b := p.bindingFor(key)
 		if b == nil && !p.unboundPassthrough {
-			return errorEnvelope("key_not_bound", "downstream key is not bound")
+			return errorEnvelope("scope_denied", "downstream key is not bound")
 		}
 		allowed, err := p.isolation.filter(pr, b)
 		if err != nil {
-			return errorEnvelope("scope_denied", err.Error())
+			var denied scopeDeniedError
+			if errors.As(err, &denied) {
+				return errorEnvelope("scope_denied", err.Error())
+			}
+			return errorEnvelope("isolation_unavailable", err.Error())
 		}
 		picked, ok := selectAllowed(p.strategy, selectionScope(key, pr), allowed, requestProviders(pr))
 		if !ok {
-			return errorEnvelope("scope_denied", "no authorized credential available")
+			return errorEnvelope("auth_unavailable", "no authorized credential available")
 		}
 		return okEnvelope(schedulerPickResponse{AuthID: picked.ID, Handled: true})
 	}

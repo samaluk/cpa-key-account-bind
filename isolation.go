@@ -50,6 +50,12 @@ var isolationMu sync.Mutex
 var routeComponent = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 var stateID = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
+// Policy failures cannot be resolved by retrying another credential. State I/O
+// and temporarily unavailable candidates remain service failures instead.
+type scopeDeniedError struct{ error }
+
+func denyScope(message string) error { return scopeDeniedError{errors.New(message)} }
+
 // Scope strings are ASCII route components, so each byte has a fixed JSON cost.
 // Include a parent hash and separator for every entry to bound the largest store.
 const maxScopeLength = 64
@@ -177,29 +183,39 @@ func (p *isolationPolicy) writeState(s sessionFile) error {
 func (p *isolationPolicy) filter(pr schedulerPickRequest, b *binding) ([]schedulerAuthCandidate, error) {
 	sid, parent, sessionErr := requestSession(pr.Options)
 	if sessionErr != nil {
-		return nil, sessionErr
+		return nil, scopeDeniedError{sessionErr}
 	}
 	parts := strings.SplitN(canonicalModelKey(pr.Model), "/", 3)
 	if len(parts) != 3 || !routeComponent.MatchString(parts[0]) || !routeComponent.MatchString(parts[1]) || parts[2] == "" {
-		return nil, errors.New("explicit scope/source/model route required")
+		return nil, denyScope("explicit scope/source/model route required")
 	}
 	scope, source := parts[0], parts[1]
 	if p.requireScopeBoundKey {
 		if b == nil {
-			return nil, errors.New("scope-bound downstream key required")
+			return nil, denyScope("scope-bound downstream key required")
 		}
 		keyScope := ""
 		for _, class := range p.classes {
 			if b.matches(class.ID) {
 				if keyScope != "" && keyScope != class.Scope {
-					return nil, errors.New("downstream binding spans account scopes")
+					return nil, denyScope("downstream binding spans account scopes")
 				}
 				keyScope = class.Scope
 			}
 		}
 		if keyScope != scope {
-			return nil, errors.New("downstream key scope mismatch")
+			return nil, denyScope("downstream key scope mismatch")
 		}
+	}
+	authorized := false
+	for _, class := range p.classes {
+		if class.Scope == scope && class.Source == source && (b == nil || b.matches(class.ID)) {
+			authorized = true
+			break
+		}
+	}
+	if !authorized {
+		return nil, denyScope("no authorized credential for requested scope/source")
 	}
 	allowed := make([]schedulerAuthCandidate, 0, len(pr.Candidates))
 	for _, c := range pr.Candidates {
@@ -210,7 +226,7 @@ func (p *isolationPolicy) filter(pr schedulerPickRequest, b *binding) ([]schedul
 		allowed = append(allowed, c)
 	}
 	if len(allowed) == 0 {
-		return nil, errors.New("no authorized credential for requested scope/source")
+		return nil, errors.New("no authorized credential currently available")
 	}
 	isolationMu.Lock()
 	defer isolationMu.Unlock()
@@ -231,14 +247,14 @@ func (p *isolationPolicy) filter(pr schedulerPickRequest, b *binding) ([]schedul
 	}
 	if old, ok := s.Sessions[id]; ok {
 		if old.Scope != scope || old.Parent != pid {
-			return nil, errors.New("immutable tree scope or parent mismatch")
+			return nil, denyScope("immutable tree scope or parent mismatch")
 		}
 		return allowed, nil
 	}
 	if pid != "" {
 		old, ok := s.Sessions[pid]
 		if !ok || old.Scope != scope {
-			return nil, errors.New("unknown parent or cross-scope descendant")
+			return nil, denyScope("unknown parent or cross-scope descendant")
 		}
 	}
 	if len(s.Sessions) >= p.limit {

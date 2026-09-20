@@ -135,6 +135,12 @@ changing the tree's scope or parent is rejected. Retry selections repeat the
 candidate filtering. Original key-binding behavior is unchanged when isolation
 is disabled.
 
+Scoped policy rejections return `scope_denied`, HTTP 403 and `retryable: false`.
+An authorized credential that is temporarily absent, or an unavailable isolation
+state file, returns HTTP 503 instead. Both cases fail closed. Hosts must preserve
+the plugin error status and treat scheduler policy denials as terminal for the
+request; upstream executor errors may still use normal credential failover.
+
 `require-scope-bound-key` optionally requires a downstream binding whose classified
 allow-list belongs to a single scope; it defaults to true. Set it to false to let otherwise permitted unbound keys
 establish scope through a provenance route. These client identities are protocol

@@ -62,6 +62,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"net/http"
 	"sync/atomic"
 	"unsafe"
 )
@@ -78,8 +79,10 @@ type envelope struct {
 }
 
 type envelopeError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Retryable  *bool  `json:"retryable,omitempty"`
 }
 
 func okEnvelope(result any) []byte {
@@ -97,6 +100,13 @@ func okEnvelope(result any) []byte {
 
 func errorEnvelope(code, message string) []byte {
 	env := envelope{Error: &envelopeError{Code: code, Message: message}}
+	if code == "scope_denied" || code == "key_not_bound" {
+		retryable := false
+		env.Error.HTTPStatus = http.StatusForbidden
+		env.Error.Retryable = &retryable
+	} else if code == "isolation_unavailable" || code == "auth_unavailable" {
+		env.Error.HTTPStatus = http.StatusServiceUnavailable
+	}
 	out, _ := json.Marshal(env)
 	return out
 }
