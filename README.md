@@ -135,6 +135,12 @@ changing the tree's scope or parent is rejected. Retry selections repeat the
 candidate filtering. Original key-binding behavior is unchanged when isolation
 is disabled.
 
+Scoped policy rejections return `scope_denied`, HTTP 403 and `retryable: false`.
+An authorized credential that is temporarily absent, or an unavailable isolation
+state file, returns HTTP 503 instead. Both cases fail closed. Hosts must preserve
+the plugin error status and treat scheduler policy denials as terminal for the
+request; upstream executor errors may still use normal credential failover.
+
 `require-scope-bound-key` optionally requires a downstream binding whose classified
 allow-list belongs to a single scope; it defaults to true. Set it to false to let otherwise permitted unbound keys
 establish scope through a provenance route. These client identities are protocol
@@ -173,8 +179,9 @@ covered. The discovered Codex/Claude/LiteLLM routes use the standard scheduler.
 
 After a core update, verify that the plugin is registered and active, and test both
 an allowed and a denied scoped request before resuming work. Back up configuration,
-the library and persistent state together. Scheduler rejection currently surfaces
-as an HTTP 500 in CPA; this plugin does not control that HTTP mapping.
+the library and persistent state together. The CPA host must preserve the plugin's
+HTTP 403/503 status and policy code. Older hosts that do not preserve scheduler
+errors can return HTTP 500 instead; verify the host mapping before deployment.
 
 The optional launcher requires an explicit model and key directory:
 
