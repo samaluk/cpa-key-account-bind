@@ -69,6 +69,32 @@ func TestIsolationTrees(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeForkAncestryRetainsScopeEnforcement(t *testing.T) {
+	const parent = "00000000-0000-4000-8000-000000000011"
+	const child = "00000000-0000-4000-8000-000000000012"
+	p := isolationFixture(t)
+	if _, err := p.filter(isolationRequest(parent, "", "personal/codex-oauth/model"), nil); err != nil {
+		t.Fatal(err)
+	}
+	request := isolationRequest(child, "", "personal/codex-oauth/model")
+	request.Options.Headers["Session-Id"] = []string{parent}
+	request.Options.Headers["Thread-Id"] = []string{child}
+	request.Options.Headers["X-Codex-Turn-Metadata"] = []string{`{"session_id":"` + child + `","thread_id":"` + child + `","forked_from_thread_id":"` + parent + `"}`}
+	if _, err := p.filter(request, nil); err != nil {
+		t.Fatalf("native same-scope fork rejected: %v", err)
+	}
+	request.Model = "work/litellm/model"
+	if _, err := p.filter(request, nil); err == nil {
+		t.Fatal("native fork changed the persisted parent scope")
+	}
+	request.Model = "personal/codex-oauth/model"
+	request.Options.Headers["Session-Id"] = []string{"unknown-parent"}
+	request.Options.Headers["X-Codex-Turn-Metadata"] = []string{`{"session_id":"` + child + `","thread_id":"` + child + `","forked_from_thread_id":"unknown-parent"}`}
+	if _, err := p.filter(request, nil); err == nil {
+		t.Fatal("native fork changed the persisted parent identity")
+	}
+}
 func TestIsolationFailures(t *testing.T) {
 	for _, name := range []string{"missing-state", "corrupt-state", "trailing-state", "missing-session", "missing-parent", "bare-model", "spoof-source", "spoof-provider", "binding", "quota", "retry", "capacity"} {
 		t.Run(name, func(t *testing.T) {

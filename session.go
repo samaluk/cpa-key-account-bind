@@ -77,7 +77,24 @@ func requestSession(opts schedulerPickOptions) (string, string, error) {
 		if json.Unmarshal([]byte(raw), &turn) != nil {
 			return "", "", errors.New("invalid Codex turn metadata")
 		}
-		if (root != "" && turn.Session != "" && root != turn.Session) || (thread != "" && turn.Thread != "" && thread != turn.Thread) {
+		if root != "" && turn.Session != "" && root != turn.Session {
+			// Native Codex forks retain the ancestor in Session-Id while
+			// turn metadata identifies the new leaf. Accept that pair only
+			// with matching leaf identities and explicit matching ancestry;
+			// the isolation policy still validates the persisted parent scope.
+			declaredParent := turn.Parent
+			if declaredParent == "" {
+				declaredParent = turn.Fork
+			}
+			if declaredParent == "" {
+				declaredParent = turn.ForkID
+			}
+			if turn.Thread == "" || turn.Session != turn.Thread || declaredParent != root ||
+				(thread != "" && thread != turn.Thread) {
+				return "", "", errors.New("conflicting Codex session identities")
+			}
+		}
+		if thread != "" && turn.Thread != "" && thread != turn.Thread {
 			return "", "", errors.New("conflicting Codex session identities")
 		}
 	}

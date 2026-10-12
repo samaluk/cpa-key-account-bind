@@ -19,6 +19,7 @@ func TestStockCPASessionIdentity(t *testing.T) {
 		{"Codex native parent is more precise than inferred root", schedulerPickOptions{Headers: map[string][]string{"Session-Id": {"ancestor"}, "Thread-Id": {child}}, Metadata: map[string]any{"canonical_session_id": "codex:" + child, "parent_session_id": "codex:" + root}}, child, root},
 		{"Codex explicit parent overrides native parent", schedulerPickOptions{Headers: map[string][]string{"Session-Id": {child}, "X-Codex-Parent-Thread-Id": {root}}, Metadata: map[string]any{"canonical_session_id": "codex:" + child, "parent_session_id": "codex:other"}}, child, root},
 		{"Fork", schedulerPickOptions{Headers: map[string][]string{"Session_id": {child}, "X-Codex-Turn-Metadata": {`{"forked_from_thread_id":"` + root + `"}`}}}, child, root},
+		{"Native fork retains ancestor session header", schedulerPickOptions{Headers: map[string][]string{"Session-Id": {root}, "Thread-Id": {child}, "X-Codex-Turn-Metadata": {`{"session_id":"` + child + `","thread_id":"` + child + `","forked_from_thread_id":"` + root + `"}`}}}, child, root},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sid, pid, err := requestSession(tc.options)
@@ -36,6 +37,9 @@ func TestStockCPARejectsMissingOrConflictingIdentity(t *testing.T) {
 		{Metadata: map[string]any{"canonical_session_id": "header:inferred", "derived_session_id": "lcp:inferred"}},
 		{Metadata: map[string]any{"canonical_session_id": "lcp:inferred"}},
 		{Headers: map[string][]string{"Session_id": {"one"}, "X-Codex-Turn-Metadata": {`{"session_id":"two"}`}}},
+		{Headers: map[string][]string{"Session-Id": {"ancestor"}, "Thread-Id": {"leaf"}, "X-Codex-Turn-Metadata": {`{"session_id":"leaf","thread_id":"leaf","forked_from_thread_id":"other"}`}}},
+		{Headers: map[string][]string{"Session-Id": {"ancestor"}, "Thread-Id": {"other"}, "X-Codex-Turn-Metadata": {`{"session_id":"leaf","thread_id":"leaf","forked_from_thread_id":"ancestor"}`}}},
+		{Headers: map[string][]string{"Session-Id": {"ancestor"}, "Thread-Id": {"leaf"}, "X-Codex-Turn-Metadata": {`{"session_id":"different","thread_id":"leaf","forked_from_thread_id":"ancestor"}`}}},
 		{Headers: map[string][]string{"Session_id": {"one"}, "X-Openai-Subagent": {"collab_spawn"}}},
 		{Headers: map[string][]string{"X-Codex-Turn-Metadata": {"{"}}},
 	}
